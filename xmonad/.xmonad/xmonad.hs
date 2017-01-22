@@ -1,41 +1,66 @@
--- default desktop configuration for Fedora
-
 import System.Posix.Env (getEnv)
-import Data.Maybe (maybe)
 
 import XMonad
-import XMonad.Config.Desktop
-import XMonad.Config.Gnome
-import XMonad.Config.Kde
-import XMonad.Config.Xfce
-import XMonad.Layout.NoBorders
-import XMonad.Actions.PhysicalScreens
-import XMonad.Layout.IndependentScreens
-import qualified Data.Map as M
-import qualified XMonad.StackSet as W
-import XMonad.Hooks.SetWMName
+import XMonad.Config.Gnome (gnomeConfig)
+import XMonad.Actions.CopyWindow (copy, kill1)
+import XMonad.Actions.PhysicalScreens (sendToScreen, viewScreen)
+import XMonad.Hooks.SetWMName (setWMName)
+import XMonad.Layout.IndependentScreens (onCurrentScreen, withScreens, workspaces')
+import XMonad.StackSet (shift, view)
+import XMonad.Util.EZConfig (additionalKeys)
 
--- main = do
---      session <- getEnv "DESKTOP_SESSION"
---      xmonad  $ maybe desktopConfig desktop session
 
-main = xmonad $ gnomeConfig {
-  keys = myKeys <+> keys gnomeConfig
-  , startupHook = setWMName "LG3D"
-  , workspaces = withScreens 2 ["web", "email", "irc"] }
-myKeys conf@(XConfig {XMonad.modMask = modm}) = M.fromList $
-  [((modm .|. mask, key), f sc)
-    | (key, sc) <- zip [xK_w, xK_e, xK_r] [0..]
-    , (f, mask) <- [(viewScreen, 0), (sendToScreen, shiftMask)]]
+workspaceControls conf =
+  let mod = modMask conf in [
+      ((mod .|. mask, key), windows $ onCurrentScreen function workspace) |
+        (workspace, key) <- zip (workspaces' conf) [xK_1 ..],
+        (function, mask) <- [
+          (view, 0),
+          (shift, XMonad.shiftMask),
+          (copy, XMonad.shiftMask XMonad..|. XMonad.controlMask)
+        ]
+    ] ++ [
+      ((mod XMonad..|. XMonad.shiftMask, XMonad.xK_c), kill1)
+    ]
 
-  ++
+screenControls conf =
+  let mod = modMask conf in [
+      ((mod .|. mask, key), function screen) |
+        (screen, key) <- zip [0 ..] [xK_w, xK_e],
+        (function, mask) <- [
+            (viewScreen, 0),
+            (sendToScreen, shiftMask)
+          ]
+    ]
 
-  [((m .|. modm, k), windows $ onCurrentScreen f i)
-     | (i, k) <- zip (workspaces' conf) [xK_1 .. xK_9]
-     , (f, m) <- [(W.greedyView, 0), (W.shift, shiftMask)]]
+soundControls :: [((ButtonMask, KeySym), X ())]
+soundControls = [
+    ((0, 0x1008ff11), spawn "amixer set Master 3%-"),
+    ((0, 0x1008ff12), spawn "amixer set Master toggle"),
+    ((0, 0x1008ff13), spawn "amixer set Master 3%+")
+  ]
 
-desktop "gnome" = gnomeConfig
-desktop "kde" = kde4Config
-desktop "xfce" = xfceConfig
-desktop "xmonad-gnome" = gnomeConfig
-desktop _ = desktopConfig
+baseHomeConfig = defaultConfig {
+    terminal = "termite",
+    --XMonad.modMask = XMonad.mod4Mask,
+    startupHook = do
+      spawn "/home/db/.xmonad/background-clock.sh"
+      spawn "/home/db/.xmonad/go-to-bed.sh",
+    workspaces = withScreens 1 $ map show [1 .. 9]
+  }
+
+homeConfig = baseHomeConfig `additionalKeys` (soundControls ++ workspaceControls baseHomeConfig)
+
+baseWorkConfig = gnomeConfig {
+    startupHook = setWMName "LG3D" -- Make swing play nice with XMonad.
+  }
+
+workConfig = baseWorkConfig `additionalKeys` (workspaceControls gnomeConfig ++ screenControls gnomeConfig)
+
+main = do
+  env <- getEnv "DESKTOP_SESSION"
+  setup env
+    where
+      setup (Just "gnome") = xmonad workConfig
+      setup _              = xmonad homeConfig
+
